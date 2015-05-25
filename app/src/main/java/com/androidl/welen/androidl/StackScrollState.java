@@ -54,7 +54,7 @@ public class StackScrollState {
                 mStateMap.put(child, viewState);
             }
             // initialize with the default values of the view
-            viewState.height = child.getIntrinsicHeight();
+            viewState.height = child.getHeight();
             viewState.gone = child.getVisibility() == View.GONE;
             viewState.alpha = 1;
             viewState.scale = 1f;
@@ -90,7 +90,7 @@ public class StackScrollState {
                 float xTranslation = child.getTranslationX();
 //                float zTranslation = child.getTranslationZ();
                 float scale = child.getScaleX();
-                int height = child.getActualHeight();
+                int height = child.getHeight();
                 float newAlpha = state.alpha;
                 float newYTranslation = state.yTranslation;
                 float newScale = state.scale;
@@ -132,35 +132,11 @@ public class StackScrollState {
                     child.setScaleY(newScale);
                 }
 
-                // apply height
-                if (height != newHeight) {
-                    child.setActualHeight(newHeight, false /* notifyListeners */);
-                }
 
-                // apply clipping
-                float oldClipTopAmount = child.getClipTopAmount();
-                if (oldClipTopAmount != state.clipTopAmount) {
-                    child.setClipTopAmount(state.clipTopAmount);
-                }
-                updateChildClip(child, newHeight, state.topOverLap);
             }
         }
     }
 
-    /**
-     * Updates the clipping of a view
-     *
-     * @param child the view to update
-     * @param height the currently applied height of the view
-     * @param clipInset how much should this view be clipped from the top
-     */
-    private void updateChildClip(NotificationView child, int height, int clipInset) {
-        mClipRect.set(0,
-                clipInset,
-                child.getWidth(),
-                height);
-        child.setClipBounds(mClipRect);
-    }
 
     public static class ViewState {
 
@@ -169,8 +145,6 @@ public class StackScrollState {
         int height;
         boolean gone;
         float scale;
-        int clipTopAmount;
-        int topOverLap;
         int notGoneIndex;
     }
 }

@@ -113,7 +113,6 @@ public class StackStateAnimator {
                 continue;
             }
 
-            child.setClipBounds(null);
             startAnimations(child, viewState, finalState, i);
         }
         if (!isRunning()) {
@@ -156,12 +155,10 @@ public class StackStateAnimator {
 //        boolean zTranslationChanging = ViewCompat.getTranslationZ(child) != viewState.zTranslation;
         boolean scaleChanging = child.getScaleX() != viewState.scale;
         boolean alphaChanging = alpha != child.getAlpha();
-        boolean heightChanging = viewState.height != child.getActualHeight();
-        boolean topInsetChanging = viewState.clipTopAmount != child.getClipTopAmount();
         boolean wasAdded = mNewAddChildren.contains(child);
         boolean hasDelays = mAnimationFilter.hasDelays;
         boolean isDelayRelevant = yTranslationChanging/* || zTranslationChanging*/ || scaleChanging ||
-                alphaChanging || heightChanging || topInsetChanging;
+                alphaChanging /*|| heightChanging || topInsetChanging*/;
         boolean noAnimation = wasAdded;
         long delay = 0;
         long duration = mCurrentLength;
@@ -206,23 +203,6 @@ public class StackStateAnimator {
             }
         }
 
-        // start height animation
-        if (heightChanging && child.getActualHeight() != 0) {
-            if (noAnimation) {
-                child.setActualHeight(viewState.height, false);
-            } else {
-                startHeightAnimation(child, viewState, duration, delay);
-            }
-        }
-
-        // start top inset animation
-        if (topInsetChanging) {
-            if (noAnimation) {
-                child.setClipTopAmount(viewState.clipTopAmount);
-            } else {
-                startInsetAnimation(child, viewState, duration, delay);
-            }
-        }
 
         if (wasAdded) {
             child.performAddAnimation(delay, mCurrentLength);
@@ -282,128 +262,7 @@ public class StackStateAnimator {
         return minDelay;
     }
 
-    private long calculateDelayGoToFullShade(StackScrollState.ViewState viewState) {
-        float index = viewState.notGoneIndex;
-        index = (float) Math.pow(index, 0.7f);
-        return (long) (index * ANIMATION_DELAY_PER_ELEMENT_GO_TO_FULL_SHADE);
-    }
 
-    private void startHeightAnimation(final NotificationView child,
-            StackScrollState.ViewState viewState, long duration, long delay) {
-        Integer previousStartValue = getChildTag(child, TAG_START_HEIGHT);
-        Integer previousEndValue = getChildTag(child, TAG_END_HEIGHT);
-        int newEndValue = viewState.height;
-        if (previousEndValue != null && previousEndValue == newEndValue) {
-            return;
-        }
-        ValueAnimator previousAnimator = getChildTag(child, TAG_ANIMATOR_HEIGHT);
-        if (!mAnimationFilter.animateHeight) {
-            // just a local update was performed
-            if (previousAnimator != null) {
-                // we need to increase all animation keyframes of the previous animator by the
-                // relative change to the end value
-                PropertyValuesHolder[] values = previousAnimator.getValues();
-                int relativeDiff = newEndValue - previousEndValue;
-                int newStartValue = previousStartValue + relativeDiff;
-                values[0].setIntValues(newStartValue, newEndValue);
-                child.setTag(TAG_START_HEIGHT, newStartValue);
-                child.setTag(TAG_END_HEIGHT, newEndValue);
-                previousAnimator.setCurrentPlayTime(previousAnimator.getCurrentPlayTime());
-                return;
-            } else {
-                // no new animation needed, let's just apply the value
-                child.setActualHeight(newEndValue, false);
-                return;
-            }
-        }
-
-        ValueAnimator animator = ValueAnimator.ofInt(child.getActualHeight(), newEndValue);
-        animator.addUpdateListener(new ValueAnimator.AnimatorUpdateListener() {
-            @Override
-            public void onAnimationUpdate(ValueAnimator animation) {
-                child.setActualHeight((int) animation.getAnimatedValue(),
-                        false /* notifyListeners */);
-            }
-        });
-        animator.setInterpolator(mFastOutSlowInInterpolator);
-        long newDuration = cancelAnimatorAndGetNewDuration(duration, previousAnimator);
-        animator.setDuration(newDuration);
-        if (delay > 0 && (previousAnimator == null || !previousAnimator.isRunning())) {
-            animator.setStartDelay(delay);
-        }
-        animator.addListener(getGlobalAnimationFinishedListener());
-        // remove the tag when the animation is finished
-        animator.addListener(new AnimatorListenerAdapter() {
-            @Override
-            public void onAnimationEnd(Animator animation) {
-                child.setTag(TAG_ANIMATOR_HEIGHT, null);
-                child.setTag(TAG_START_HEIGHT, null);
-                child.setTag(TAG_END_HEIGHT, null);
-            }
-        });
-        startAnimator(animator);
-        child.setTag(TAG_ANIMATOR_HEIGHT, animator);
-        child.setTag(TAG_START_HEIGHT, child.getActualHeight());
-        child.setTag(TAG_END_HEIGHT, newEndValue);
-    }
-
-    private void startInsetAnimation(final NotificationView child,
-            StackScrollState.ViewState viewState, long duration, long delay) {
-        Integer previousStartValue = getChildTag(child, TAG_START_TOP_INSET);
-        Integer previousEndValue = getChildTag(child, TAG_END_TOP_INSET);
-        int newEndValue = viewState.clipTopAmount;
-        if (previousEndValue != null && previousEndValue == newEndValue) {
-            return;
-        }
-        ValueAnimator previousAnimator = getChildTag(child, TAG_ANIMATOR_TOP_INSET);
-        if (!mAnimationFilter.animateTopInset) {
-            // just a local update was performed
-            if (previousAnimator != null) {
-                // we need to increase all animation keyframes of the previous animator by the
-                // relative change to the end value
-                PropertyValuesHolder[] values = previousAnimator.getValues();
-                int relativeDiff = newEndValue - previousEndValue;
-                int newStartValue = previousStartValue + relativeDiff;
-                values[0].setIntValues(newStartValue, newEndValue);
-                child.setTag(TAG_START_TOP_INSET, newStartValue);
-                child.setTag(TAG_END_TOP_INSET, newEndValue);
-                previousAnimator.setCurrentPlayTime(previousAnimator.getCurrentPlayTime());
-                return;
-            } else {
-                // no new animation needed, let's just apply the value
-                child.setClipTopAmount(newEndValue);
-                return;
-            }
-        }
-
-        ValueAnimator animator = ValueAnimator.ofInt(child.getClipTopAmount(), newEndValue);
-        animator.addUpdateListener(new ValueAnimator.AnimatorUpdateListener() {
-            @Override
-            public void onAnimationUpdate(ValueAnimator animation) {
-                child.setClipTopAmount((int) animation.getAnimatedValue());
-            }
-        });
-        animator.setInterpolator(mFastOutSlowInInterpolator);
-        long newDuration = cancelAnimatorAndGetNewDuration(duration, previousAnimator);
-        animator.setDuration(newDuration);
-        if (delay > 0 && (previousAnimator == null || !previousAnimator.isRunning())) {
-            animator.setStartDelay(delay);
-        }
-        animator.addListener(getGlobalAnimationFinishedListener());
-        // remove the tag when the animation is finished
-        animator.addListener(new AnimatorListenerAdapter() {
-            @Override
-            public void onAnimationEnd(Animator animation) {
-                child.setTag(TAG_ANIMATOR_TOP_INSET, null);
-                child.setTag(TAG_START_TOP_INSET, null);
-                child.setTag(TAG_END_TOP_INSET, null);
-            }
-        });
-        startAnimator(animator);
-        child.setTag(TAG_ANIMATOR_TOP_INSET, animator);
-        child.setTag(TAG_START_TOP_INSET, child.getClipTopAmount());
-        child.setTag(TAG_END_TOP_INSET, newEndValue);
-    }
 
     private void startAlphaAnimation(final NotificationView child,
             final StackScrollState.ViewState viewState, long duration, long delay) {
@@ -738,7 +597,6 @@ public class StackStateAnimator {
                 changingView.setAlpha(viewState.alpha);
                 changingView.setTranslationY(viewState.yTranslation);
 //                ViewCompat.setTranslationZ(changingView, viewState.zTranslation);
-                changingView.setActualHeight(viewState.height, false);
                 mNewAddChildren.add(changingView);
 
             } else if (event.animationType ==
@@ -752,7 +610,7 @@ public class StackStateAnimator {
                 // direction of the remove animation (either downwards or upwards)
                 StackScrollState.ViewState viewState = finalState
                         .getViewStateForView(event.viewAfterChangingView);
-                int actualHeight = changingView.getActualHeight();
+                int actualHeight = changingView.getHeight();
                 // upwards by default
                 float translationDirection = -1.0f;
                 if (viewState != null) {
@@ -822,19 +680,5 @@ public class StackStateAnimator {
         }
     }
 
-    /**
-     * Get the end value of the height animation running on a view or the actualHeight
-     * if no animation is running.
-     */
-    public static int getFinalActualHeight(NotificationView view) {
-        if (view == null) {
-            return 0;
-        }
-        ValueAnimator heightAnimator = getChildTag(view, TAG_ANIMATOR_HEIGHT);
-        if (heightAnimator == null) {
-            return view.getActualHeight();
-        } else {
-            return getChildTag(view, TAG_END_HEIGHT);
-        }
-    }
+
 }

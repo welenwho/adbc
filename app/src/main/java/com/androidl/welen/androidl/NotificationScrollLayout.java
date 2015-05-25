@@ -41,8 +41,7 @@ import java.util.HashSet;
  * A layout which handles a dynamic amount of notifications and presents them in a scrollable stack.
  */
 public class NotificationScrollLayout extends ViewGroup
-        implements SwipeHelper.Callback, ScrollAdapter,
-        NotificationView.OnHeightChangedListener, ViewGroup.OnHierarchyChangeListener {
+        implements SwipeHelper.Callback, ScrollAdapter, ViewGroup.OnHierarchyChangeListener {
 
     private static final String TAG = "NotificationStackScrollLayout";
     private static final boolean DEBUG = true;
@@ -109,7 +108,6 @@ public class NotificationScrollLayout extends ViewGroup
 
     private OnChildLocationsChangedListener mListener;
     private OnOverscrollTopChangedListener mOverscrollTopChangedListener;
-    private NotificationView.OnHeightChangedListener mOnHeightChangedListener;
     private boolean mNeedsAnimation;
     private boolean mTopPaddingNeedsAnimation;
     private boolean mChildrenUpdateRequested;
@@ -212,14 +210,8 @@ public class NotificationScrollLayout extends ViewGroup
 
     private void updatePadding() {
         updateContentHeight();
-        notifyHeightChangeListener(null);
     }
 
-    private void notifyHeightChangeListener(NotificationView view) {
-        if (mOnHeightChangedListener != null) {
-            mOnHeightChangedListener.onHeightChanged(view);
-        }
-    }
 
     @Override
     protected void onMeasure(int widthMeasureSpec, int heightMeasureSpec) {
@@ -241,10 +233,12 @@ public class NotificationScrollLayout extends ViewGroup
             View child = getChildAt(i);
             float width = child.getMeasuredWidth();
             float height = child.getMeasuredHeight();
+            int top = mStackScrollAlgorithm.isRevertLayout()? (int) (getHeight() - height) : 0;
+            int bottom = (int) (top+height);
             child.layout((int) (centerX - width / 2.0f),
-                    0,
+                    top,
                     (int) (centerX + width / 2.0f),
-                    (int) height);
+                    bottom);
         }
         setMaxLayoutHeight(getHeight());
         updateContentHeight();
@@ -274,7 +268,6 @@ public class NotificationScrollLayout extends ViewGroup
 
     private void updateAlgorithmHeightAndPadding() {
         mStackScrollAlgorithm.setLayoutHeight(getLayoutHeight());
-        mStackScrollAlgorithm.setTopPadding(0);
     }
 
     /**
@@ -283,7 +276,7 @@ public class NotificationScrollLayout extends ViewGroup
      */
     private void updateChildren() {
         mAmbientState.setScrollY(mOwnScrollY);
-        mStackScrollAlgorithm.getStackScrollState(mAmbientState, mCurrentStackScrollState);
+        mStackScrollAlgorithm.getStackScrollState(mAmbientState, mCurrentStackScrollState, getScrollRange());
         if (!isCurrentlyAnimating() && !mNeedsAnimation) {
             applyCurrentState();
         } else {
@@ -398,8 +391,15 @@ public class NotificationScrollLayout extends ViewGroup
                 continue;
             }
             float childTop = slidingChild.getTranslationY();
-            float top = childTop + slidingChild.getClipTopAmount();
-            float bottom = childTop + slidingChild.getActualHeight();
+            float top;
+            float bottom;
+            if(mStackScrollAlgorithm.isRevertLayout()){
+                bottom = slidingChild.getTranslationY()+mMaxLayoutHeight;
+                top = bottom - slidingChild.getHeight();
+            }else{
+                top = slidingChild.getTranslationY();
+                bottom = top + slidingChild.getHeight();
+            }
 
             // Allow the full width of this view to prevent gesture conflict on Keyguard (phone and
             // camera affordance).
@@ -456,7 +456,6 @@ public class NotificationScrollLayout extends ViewGroup
     }
 
     public void dismissViewAnimated(View child, Runnable endRunnable, int delay, long duration) {
-        ((NotificationView)child).setClipBounds(null);
         mSwipeHelper.dismissChild(child, 0, endRunnable, delay, true, duration);
     }
 
@@ -541,10 +540,18 @@ public class NotificationScrollLayout extends ViewGroup
                     int range = getScrollRange();
 
                     float scrollAmount;
-                    if (deltaY < 0) {//往下滑动
-                        scrollAmount = overScrollDown(deltaY);
-                    } else {
-                        scrollAmount = overScrollUp(deltaY, range);
+                    if(isRevert()){
+                        if(deltaY < 0){
+                            scrollAmount = overScrollDownRevert(deltaY, range);
+                        }else{
+                            scrollAmount = overScrollUpRevert(deltaY);
+                        }
+                    }else{
+                        if (deltaY < 0) {//往下滑动
+                            scrollAmount = overScrollDown(deltaY);
+                        } else {
+                            scrollAmount = overScrollUp(deltaY, range);
+                        }
                     }
 
                     // Calling overScrollBy will call onOverScrolled, which
@@ -563,28 +570,36 @@ public class NotificationScrollLayout extends ViewGroup
                     velocityTracker.computeCurrentVelocity(1000, mMaximumVelocity);
                     int initialVelocity = (int) velocityTracker.getYVelocity(mActivePointerId);
 
-                    /*if (shouldOverScrollFling(initialVelocity)) {
-                        onOverScrollFling(true, initialVelocity);
-                    } else {*/
-                        if (getChildCount() > 0) {
-                            if ((Math.abs(initialVelocity) > mMinimumVelocity)) {
-                                float currentOverScrollTop = getCurrentOverScrollAmount(true);
-                                if (currentOverScrollTop == 0.0f || initialVelocity > 0) {
-                                    Log.i("welen", "fling");
+                    if (getChildCount() > 0) {
+                        if ((Math.abs(initialVelocity) > mMinimumVelocity)) {
+                            if(isRevert()){
+                                /*float currentOverScrollBottom = getCurrentOverScrollAmount(false);
+                                if (currentOverScrollBottom == 0.0f || initialVelocity < 0) {
+                                    Log.i("welen", "fling R"+ currentOverScrollBottom+" velocity="+initialVelocity);*/
+                                    flingRert(initialVelocity);
+                                /*} else {
+                                    Log.i("welen", "overscrollflingR");
+                                    onOverScrollFling(false, -initialVelocity);
+                                }*/
+                            }else{
+                                //float currentOverScrollTop = getCurrentOverScrollAmount(true);
+                                /*if (currentOverScrollTop == 0.0f || initialVelocity > 0) {
+                                    //往上滑动 init < 0
+                                    Log.i("welen", "fling"+ currentOverScrollTop+ "velocity="+initialVelocity);*/
                                     fling(-initialVelocity);
-                                } else {
+                                /*} else {
                                     Log.i("welen", "overscrollfling");
                                     onOverScrollFling(false, initialVelocity);
-                                }
-                            } else {
-                                int scrollRange = getScrollRange();
-                                Log.i("welen","springback ");
-                                if (mScroller.springBack(getScrollX(), mOwnScrollY, 0, 0, 0, scrollRange)) {
-                                    postInvalidateOnAnimation();
-                                }
+                                }*/
+                            }
+                        } else {
+                            int scrollRange = getScrollRange();
+                            Log.i("welen","springback "+ mOwnScrollY);
+                            if (mScroller.springBack(getScrollX(), mOwnScrollY, 0, 0, 0,scrollRange)) {
+                                postInvalidateOnAnimation();
                             }
                         }
-//                    }
+                    }
 
                     mActivePointerId = INVALID_POINTER;
                     endDrag();
@@ -647,12 +662,11 @@ public class NotificationScrollLayout extends ViewGroup
         if (newScrollY > range) {
                 float currentBottomPixels = getCurrentOverScrolledPixels(false);
                 // We overScroll on the top
-                setOverScrolledPixels(currentBottomPixels + newScrollY - range,
+                setOverScrolledPixels(currentBottomPixels + newScrollY - range,//设置地步超过曲玉
                         false /* onTop */,
                         false /* animate */);
             mOwnScrollY = range;
             scrollAmount = 0.0f;
-            Log.i("welen"," overScrollUp"+ newScrollY+ "="+ currentBottomPixels+ "="+range);
         }
         return scrollAmount;
     }
@@ -664,7 +678,7 @@ public class NotificationScrollLayout extends ViewGroup
      * @return The amount of scrolling to be performed by the scroller,
      *         not handled by the overScroll amount.
      */
-    private float overScrollDown(int deltaY) {
+    private float overScrollDown(int deltaY) {//-
         deltaY = Math.min(deltaY, 0);
         float currentBottomAmount = getCurrentOverScrollAmount(false);
         float newBottomAmount = currentBottomAmount + deltaY;
@@ -684,7 +698,56 @@ public class NotificationScrollLayout extends ViewGroup
                     false /* animate */);
             mOwnScrollY = 0;
             scrollAmount = 0.0f;
-            Log.i("welen"," overScrollDown"+ newScrollY+ "="+ currentTopPixels);
+        }
+        return scrollAmount;
+    }
+
+    private float overScrollUpRevert(int deltaY){
+        deltaY = Math.max(deltaY, 0);
+        float currentUpAmount = getCurrentOverScrollAmount(true);
+        float newBottomAmount = currentUpAmount - deltaY;
+        if (currentUpAmount > 0) {
+            setOverScrollAmount(newBottomAmount, true /* onTop */,
+                    false /* animate */);
+        }
+        // Bottom overScroll might not grab all scrolling motion,
+        // we have to scroll as well.
+        float scrollAmount = newBottomAmount < 0 ? newBottomAmount : 0.0f;
+        float newScrollY = mOwnScrollY + scrollAmount;
+        if (newScrollY < 0) {
+            float currentBottomPixels = getCurrentOverScrolledPixels(false);
+            // We overScroll on the top
+            setOverScrolledPixels(currentBottomPixels - newScrollY,
+                    false /* onTop */,
+                    false /* animate */);
+            mOwnScrollY = 0;
+            scrollAmount = 0.0f;
+
+        }
+        return scrollAmount;
+    }
+
+
+    private float overScrollDownRevert(int deltaY, int range) {//-
+        deltaY = Math.min(deltaY, 0);
+        float currentButtonAmount = getCurrentOverScrollAmount(false);
+        float newTopAmount = currentButtonAmount + deltaY;
+        if (currentButtonAmount > 0) {
+            setOverScrollAmount(newTopAmount, false /* onTop */,
+                    false /* animate */);
+        }
+        // Top overScroll might not grab all scrolling motion,
+        // we have to scroll as well.
+        float scrollAmount = newTopAmount < 0 ? -newTopAmount : 0.0f;
+        float newScrollY = mOwnScrollY + scrollAmount;
+        if (newScrollY > range) {
+            float currentTopPixels = getCurrentOverScrolledPixels(true);
+            // We overScroll on the top
+            setOverScrolledPixels(currentTopPixels + newScrollY - range,//设置地步超过曲玉
+                    true /* onTop */,
+                    false /* animate */);
+            mOwnScrollY = range;
+            scrollAmount = 0.0f;
         }
         return scrollAmount;
     }
@@ -755,6 +818,10 @@ public class NotificationScrollLayout extends ViewGroup
         }
     }
 
+    boolean isRevert(){
+        return mStackScrollAlgorithm.isRevertLayout();
+    }
+
     @Override
     protected boolean overScrollBy(int deltaX, int deltaY,
             int scrollX, int scrollY,
@@ -764,17 +831,32 @@ public class NotificationScrollLayout extends ViewGroup
 
         int newScrollY = scrollY + deltaY;
 
-        final int top = -maxOverScrollY;
-        final int bottom = maxOverScrollY + scrollRangeY;
-
+        final int top;
+        final int bottom;
         boolean clampedY = false;
-        if (newScrollY > bottom) {
-            newScrollY = bottom;
-            clampedY = true;
-        } else if (newScrollY < top) {
-            newScrollY = top;
-            clampedY = true;
+        if(isRevert()){
+            top = maxOverScrollY + scrollRangeY;
+            bottom = -maxOverScrollY;
+            if (newScrollY > top) {
+                newScrollY = top;
+                clampedY = true;
+            } else if (newScrollY < bottom) {
+                newScrollY = bottom;
+                clampedY = true;
+            }
+        }else{
+            top = -maxOverScrollY;
+            bottom = maxOverScrollY + scrollRangeY;
+            if (newScrollY > bottom) {
+                newScrollY = bottom;
+                clampedY = true;
+            } else if (newScrollY < top) {
+                newScrollY = top;
+                clampedY = true;
+            }
         }
+
+        Log.i("welen","new scrolly="+newScrollY+" clampedy="+clampedY);
 
         onOverScrolled(0, newScrollY, false, clampedY);
 
@@ -927,21 +1009,39 @@ public class NotificationScrollLayout extends ViewGroup
     private void springBack() {
         int scrollRange = getScrollRange();
         boolean overScrolledTop = mOwnScrollY <= 0;
+        if(isRevert()){
+            overScrolledTop = mOwnScrollY >= scrollRange;
+        }
         boolean overScrolledBottom = mOwnScrollY >= scrollRange;
+        if(isRevert()){
+            overScrolledBottom = mOwnScrollY <= 0;
+        }
         if (overScrolledTop || overScrolledBottom) {
             boolean onTop;
             float newAmount;
             if (overScrolledTop) {
                 onTop = true;
-                newAmount = -mOwnScrollY;
-                mOwnScrollY = 0;
+
+                if(isRevert()){
+                    newAmount = mOwnScrollY - scrollRange;
+                    mOwnScrollY = scrollRange;
+                }else{
+                    newAmount = -mOwnScrollY;
+                    mOwnScrollY = 0;
+                }
                 mDontReportNextOverScroll = true;
             } else {
                 onTop = false;
-                newAmount = mOwnScrollY - scrollRange;
-                mOwnScrollY = scrollRange;
+
+                if(isRevert()){
+                    newAmount = -mOwnScrollY;
+                    mOwnScrollY = 0;
+                }else{
+                    newAmount = mOwnScrollY - scrollRange;//mOwnScrolly equals scrollRange add bottomAmount in fling
+                    mOwnScrollY = scrollRange;
+                }
             }
-            Log.i("welen", "amount=" + newAmount);
+            Log.i("welen", "amount=" + newAmount +" top="+onTop);
             setOverScrollAmount(newAmount, onTop, false);
             setOverScrollAmount(0.0f, onTop, true);
             mScroller.forceFinished(true);
@@ -950,21 +1050,8 @@ public class NotificationScrollLayout extends ViewGroup
 
     private int getScrollRange() {
         int contentHeight = getContentHeight();
-        return Math.max(0, contentHeight - mMaxLayoutHeight);
-    }
-
-    /**
-     * @return the first child which has visibility unequal to GONE
-     */
-    private View getFirstChildNotGone() {
-        int childCount = getChildCount();
-        for (int i = 0; i < childCount; i++) {
-            View child = getChildAt(i);
-            if (child.getVisibility() != View.GONE) {
-                return child;
-            }
-        }
-        return null;
+        int range = Math.max(0, contentHeight - mMaxLayoutHeight);
+        return range;
     }
 
     /**
@@ -1017,14 +1104,6 @@ public class NotificationScrollLayout extends ViewGroup
         return count;
     }
 
-    private int getMaxExpandHeight(View view) {
-        if (view instanceof NotificationRow) {
-            NotificationRow row = (NotificationRow) view;
-            return row.getIntrinsicHeight();
-        }
-        return view.getHeight();
-    }
-
     public int getContentHeight() {
         return mContentHeight;
     }
@@ -1039,13 +1118,7 @@ public class NotificationScrollLayout extends ViewGroup
                     // add the padding before this element
                     height += mPaddingBetweenElements;
                 }
-                if (child instanceof NotificationRow) {
-                    NotificationRow row = (NotificationRow) child;
-                    height += row.getIntrinsicHeight();
-                } else if (child instanceof NotificationView) {
-                    NotificationView notificationView = (NotificationView) child;
-                    height += notificationView.getActualHeight();
-                }
+                height += child.getHeight();
             }
         }
         mContentHeight = height;
@@ -1066,21 +1139,55 @@ public class NotificationScrollLayout extends ViewGroup
             float bottomAmount = getCurrentOverScrollAmount(false);
             if (velocityY < 0 && topAmount > 0) {
                 mOwnScrollY -= (int) topAmount;
+                Log.i("welen","fling="+velocityY+" topAmount="+topAmount+ "owns="+mOwnScrollY);
                 mDontReportNextOverScroll = true;
                 setOverScrollAmount(topAmount, true, false);
                 mMaxOverScroll = Math.abs(velocityY) / 1000f * getRubberBandFactor(true /* onTop */)
                         * mOverflingDistance + topAmount;
             } else if (velocityY > 0 && bottomAmount > 0) {
                 mOwnScrollY += bottomAmount;
+                Log.i("welen","fling="+velocityY+" bottomAmount="+bottomAmount+ "owns="+mOwnScrollY);
                 setOverScrollAmount(0, false, false);
                 mMaxOverScroll = Math.abs(velocityY) / 1000f
                         * getRubberBandFactor(false /* onTop */) * mOverflingDistance
                         +  bottomAmount;
             } else {
+                Log.i("welen","fling topAmount="+topAmount+" bottomAmount="+bottomAmount);
                 // it will be set once we reach the boundary
                 mMaxOverScroll = 0.0f;
             }
             mScroller.fling(getScrollX(), mOwnScrollY, 1, velocityY, 0, 0, 0,
+                    Math.max(0, scrollRange), 0, Integer.MAX_VALUE / 2);
+
+            postInvalidateOnAnimation();
+        }
+    }
+    private void flingRert(int velocityY) {
+        if (getChildCount() > 0) {
+            int scrollRange = getScrollRange();
+
+            float topAmount = getCurrentOverScrollAmount(true);
+            float bottomAmount = getCurrentOverScrollAmount(false);
+            if (velocityY < 0 && bottomAmount > 0) {
+                mOwnScrollY -= bottomAmount;
+                Log.i("welen","fling="+velocityY+" bottomAmount="+bottomAmount+ "owns="+mOwnScrollY);
+                setOverScrollAmount(bottomAmount, false, false);
+                mMaxOverScroll = Math.abs(velocityY) / 1000f
+                        * getRubberBandFactor(false /* onTop */) * mOverflingDistance
+                        +  bottomAmount;
+            } else if (velocityY > 0 && topAmount > 0) {
+                mOwnScrollY += (int) topAmount;
+                Log.i("welen","fling="+velocityY+" topAmount="+topAmount+ "owns="+mOwnScrollY);
+                mDontReportNextOverScroll = true;
+                setOverScrollAmount(0, true, false);
+                mMaxOverScroll = Math.abs(velocityY) / 1000f * getRubberBandFactor(true /* onTop */)
+                        * mOverflingDistance + topAmount;
+            } else {
+                Log.i("welen","fling topAmount="+topAmount+" bottomAmount="+bottomAmount);
+                // it will be set once we reach the boundary
+                mMaxOverScroll = 0.0f;
+            }
+            mScroller.fling(getScrollX(), mOwnScrollY, 0, velocityY, 0, 0, 0,
                     Math.max(0, scrollRange), 0, Integer.MAX_VALUE / 2);
 
             postInvalidateOnAnimation();
@@ -1156,7 +1263,6 @@ public class NotificationScrollLayout extends ViewGroup
             return;
         }
         NotificationView childView = (NotificationView) child;
-        childView.setOnHeightChangedListener(null);
         mCurrentStackScrollState.removeViewStateForView(child);
         updateScrollStateForRemovedChild(child);
         boolean animationGenerated = generateRemoveAnimation(child);
@@ -1167,7 +1273,6 @@ public class NotificationScrollLayout extends ViewGroup
         }*/
 
         // Make sure the clipRect we might have set is removed
-        childView.setClipBounds(null);
     }
    /* @Override
     protected void onViewRemoved(View child) {
@@ -1218,10 +1323,6 @@ public class NotificationScrollLayout extends ViewGroup
     }
 
     private int getIntrinsicHeight(View view) {
-        if (view instanceof NotificationView) {
-            NotificationView notificationView = (NotificationView) view;
-            return notificationView.getIntrinsicHeight();
-        }
         return view.getHeight();
     }
 
@@ -1245,7 +1346,6 @@ public class NotificationScrollLayout extends ViewGroup
 
     @Override
     public void onChildViewAdded(View parent, View child) {
-        ((NotificationView) child).setOnHeightChangedListener(this);
         Log.i(TAG, "onChildViewAdded");
         generateAddAnimation(child, false /* fromMoreCard */);
     }
@@ -1556,15 +1656,12 @@ public class NotificationScrollLayout extends ViewGroup
         return Math.max(emptyMargin, 0);
     }
 
-    @Override
     public void onHeightChanged(NotificationView view) {
         updateContentHeight();
         clampScrollPosition();
-        notifyHeightChangeListener(view);
         requestChildrenUpdate();
     }
 
-    @Override
     public void onReset(NotificationView view) {
         if (mAnimationsEnabled) {
             mRequestViewResizeAnimationOnLayout = true;
@@ -1573,10 +1670,6 @@ public class NotificationScrollLayout extends ViewGroup
     }
 
 
-    public void setOnHeightChangedListener(
-            NotificationView.OnHeightChangedListener mOnHeightChangedListener) {
-        this.mOnHeightChangedListener = mOnHeightChangedListener;
-    }
 
     public void onChildAnimationFinished() {
         requestChildrenUpdate();

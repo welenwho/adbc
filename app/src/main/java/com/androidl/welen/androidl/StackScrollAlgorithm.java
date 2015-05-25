@@ -33,28 +33,26 @@ public class StackScrollAlgorithm {
     private static final String LOG_TAG = "StackScrollAlgorithm";
 
     private int mPaddingBetweenElements;
-    private int mRoundedRectCornerRadius;
 
     private int mLayoutHeight;
 
-    private boolean mRevertLayout;
-    private int mTopPadding;
+    private boolean mRevertLayout = true;
     private StackScrollAlgorithmState mTempAlgorithmState = new StackScrollAlgorithmState();
 
     public StackScrollAlgorithm(Context context) {
         initConstants(context);
     }
 
+    public boolean isRevertLayout(){
+        return mRevertLayout;
+    }
 
     private void initConstants(Context context) {
         mPaddingBetweenElements = context.getResources()
                 .getDimensionPixelSize(R.dimen.notification_padding);
-        mRoundedRectCornerRadius = context.getResources().getDimensionPixelSize(
-                R.dimen.notification_material_rounded_rect_radius);
-        mRevertLayout = true;
     }
 
-    public void getStackScrollState(AmbientState ambientState, StackScrollState resultState) {
+    public void getStackScrollState(AmbientState ambientState, StackScrollState resultState, int range) {
         // The state of the local variables are saved in an algorithmState to easily subdivide it
         // into multiple phases.
         StackScrollAlgorithmState algorithmState = mTempAlgorithmState;
@@ -69,79 +67,25 @@ public class StackScrollAlgorithm {
 
         // Due to the overScroller, the stackscroller can have negative scroll state. This is
         // already accounted for by the top padding and doesn't need an additional adaption
+
         scrollY = Math.max(0, scrollY);
-        algorithmState.scrollY = (int) (scrollY + bottomOverScroll-topOverScroll);
+        if(mRevertLayout){
+            algorithmState.scrollY = (int) (scrollY - bottomOverScroll+topOverScroll);
+        }else{
+            algorithmState.scrollY = (int) (scrollY + bottomOverScroll-topOverScroll);
+        }
 
         updateVisibleChildren(resultState, algorithmState);
 
-        updatePositionsForState(resultState, algorithmState);
+        if(mRevertLayout){
+            updatePositionsForStateRevert(resultState, algorithmState);
+        }else{
+            updatePositionsForState(resultState, algorithmState);
+        }
 
         handleDraggedViews(ambientState, resultState, algorithmState);
-        updateClipping(resultState, algorithmState);
     }
 
-
-    private void updateClipping(StackScrollState resultState,
-            StackScrollAlgorithmState algorithmState) {
-        float previousNotificationEnd = 0;
-        float previousNotificationStart = 0;
-        boolean previousNotificationIsSwiped = false;
-        int childCount = algorithmState.visibleChildren.size();
-        for (int i = 0; i < childCount; i++) {
-            NotificationView child = algorithmState.visibleChildren.get(i);
-            StackScrollState.ViewState state = resultState.getViewStateForView(child);
-            float newYTranslation = state.yTranslation + state.height * (1f - state.scale) / 2f;
-            float newHeight = state.height * state.scale;
-            // apply clipping and shadow
-            float newNotificationEnd = newYTranslation + newHeight;
-
-            // In the unlocked shade we have to clip a little bit higher because of the rounded
-            // corners of the notifications.
-            float clippingCorrection = mRoundedRectCornerRadius * state.scale;
-
-            // When the previous notification is swiped, we don't clip the content to the
-            // bottom of it.
-            float clipHeight = previousNotificationIsSwiped
-                    ? newHeight
-                    : newNotificationEnd - (previousNotificationEnd - clippingCorrection);
-
-            updateChildClippingAndBackground(state, newHeight, clipHeight,
-                    newHeight - (previousNotificationStart - newYTranslation));
-
-            if (!child.isTransparent()) {
-                // Only update the previous values if we are not transparent,
-                // otherwise we would clip to a transparent view.
-                previousNotificationStart = newYTranslation + state.clipTopAmount * state.scale;
-                previousNotificationEnd = newNotificationEnd;
-                previousNotificationIsSwiped = child.getTranslationX() != 0;
-            }
-        }
-    }
-
-    /**
-     * Updates the shadow outline and the clipping for a view.
-     *
-     * @param state the viewState to update
-     * @param realHeight the currently applied height of the view
-     * @param clipHeight the desired clip height, the rest of the view will be clipped from the top
-     * @param backgroundHeight the desired background height. The shadows of the view will be
-     *                         based on this height and the content will be clipped from the top
-     */
-    private void updateChildClippingAndBackground(StackScrollState.ViewState state,
-            float realHeight, float clipHeight, float backgroundHeight) {
-        if (realHeight > clipHeight) {
-            // Rather overlap than create a hole.
-            state.topOverLap = (int) Math.floor((realHeight - clipHeight) / state.scale);
-        } else {
-            state.topOverLap = 0;
-        }
-        if (realHeight > backgroundHeight) {
-            // Rather overlap than create a hole.
-            state.clipTopAmount = (int) Math.floor((realHeight - backgroundHeight) / state.scale);
-        } else {
-            state.clipTopAmount = 0;
-        }
-    }
 
     /**
      * Handle the special state when views are being dragged
@@ -163,25 +107,7 @@ public class StackScrollAlgorithm {
             }
         }
 
-       /* for (View draggedView : draggedViews) {
-            int childIndex = algorithmState.visibleChildren.indexOf(draggedView);
-            if (childIndex >= 0 && childIndex < algorithmState.visibleChildren.size() - 1) {
-                View nextChild = algorithmState.visibleChildren.get(childIndex + 1);
-                if (!draggedViews.contains(nextChild)) {
-                    // only if the view is not dragged itself we modify its state to be fully
-                    // visible
-                    StackScrollState.ViewState viewState = resultState.getViewStateForView(
-                            nextChild);
-                    // The child below the dragged one must be fully visible
-                    viewState.alpha = 0.6f;
-                }
 
-                // Lets set the alpha to the one it currently has, as its currently being dragged
-                StackScrollState.ViewState viewState = resultState.getViewStateForView(draggedView);
-                // The dragged child should keep the set alpha
-                viewState.alpha = draggedView.getAlpha();
-            }
-        }*/
     }
 
     /**
@@ -231,27 +157,45 @@ public class StackScrollAlgorithm {
 
             if (i == 0) {//之所以第一个特殊处理,是因为所有的item都是以第一个为参考,第一个的translation处理了滑动,后面的item都会跟着他
                 childViewState.yTranslation = - algorithmState.scrollY;
-                Log.i("welen","y="+childViewState.yTranslation +" alpha="+childViewState.alpha);
             }
 
             currentYPosition = childViewState.yTranslation + childHeight + mPaddingBetweenElements;
             yPositionInScrollView = yPositionInScrollViewAfterElement;
 
-            childViewState.yTranslation += mTopPadding;
+        }
+    }
+
+    private void updatePositionsForStateRevert(StackScrollState resultState,
+                                         StackScrollAlgorithmState algorithmState) {
+        // The y coordinate of the current child.
+        float currentYPosition = 0.0f;
+
+        int childCount = algorithmState.visibleChildren.size();
+        for (int i = 0; i < childCount; i++) {
+            NotificationView child = algorithmState.visibleChildren.get(i);
+            StackScrollState.ViewState childViewState = resultState.getViewStateForView(child);
+            int childHeight = getChildHeight(child);
+            //当前这个element的下面element的位置
+            childViewState.yTranslation = currentYPosition;
+
+            if (i == 0) {//之所以第一个特殊处理,是因为所有的item都是以第一个为参考,第一个的translation处理了滑动,后面的item都会跟着他
+                childViewState.yTranslation = algorithmState.scrollY+childHeight;
+            }
+
+            childViewState.yTranslation -= childHeight;
+            currentYPosition = childViewState.yTranslation - mPaddingBetweenElements;
+
         }
     }
 
     private int getChildHeight(NotificationView child) {
-        return child.getActualHeight();
+        return child.getHeight();
     }
 
     public void setLayoutHeight(int layoutHeight) {
         this.mLayoutHeight = layoutHeight;
     }
 
-    public void setTopPadding(int topPadding) {
-        mTopPadding = topPadding;
-    }
 
 
     public void onReset(NotificationView view) {
